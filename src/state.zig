@@ -9,10 +9,12 @@ const ProgramCounter = @import("registers/program_counter.zig").ProgramCounter;
 const Stack = @import("stack.zig").Stack;
 const Registers = @import("registers/general.zig").Registers;
 const IndexRegister = @import("registers//index_register.zig").IndexRegister;
+const Timers = @import("timers.zig").Timers;
+const Keypad = @import("keypad.zig").Keypad;
 
-pub const Ambiguity = enum {
-    old,
-    new,
+pub const Version = enum {
+    chip_8,
+    super_chip,
 };
 
 pub const State = struct {
@@ -22,11 +24,10 @@ pub const State = struct {
     program_counter: ProgramCounter,
     index_register: IndexRegister,
     registers: Registers,
+    timers: Timers,
+    keypad: Keypad,
 
-    config: struct {
-        ambiguity_8xy6_8xye: Ambiguity,
-        ambiguity_fx55_fx65: Ambiguity,
-    },
+    config: struct { version: Version },
 
     pub fn init(path: []const u8) !State {
         try utils.initSDL();
@@ -37,6 +38,8 @@ pub const State = struct {
         const stack = try Stack.init();
         const registers = Registers.init();
         const index_register = IndexRegister.init();
+        const timers = try Timers.init();
+        const keypad = Keypad.init();
 
         return .{
             .display = display,
@@ -45,15 +48,19 @@ pub const State = struct {
             .stack = stack,
             .registers = registers,
             .index_register = index_register,
-            .config = .{
-                .ambiguity_8xy6_8xye = Ambiguity.new,
-                .ambiguity_fx55_fx65 = Ambiguity.new,
-            },
+            .timers = timers,
+            .keypad = keypad,
+            .config = .{ .version = Version.chip_8 },
         };
     }
 
-    pub fn deinit(self: *const State) void {
+    pub fn setup(self: *State) !void {
+        return self.timers.poll();
+    }
+
+    pub fn deinit(self: *State) void {
         self.display.deinit();
+        self.timers.deinit();
         utils.deinitSDL();
     }
 
@@ -122,6 +129,7 @@ pub const State = struct {
             },
             Instruction.inst_8XY0 => |payload| {
                 const y_reg_val = self.registers.getReg(payload.y_reg);
+
                 self.registers.setReg(payload.x_reg, y_reg_val);
                 self.program_counter.increment();
             },
@@ -130,6 +138,7 @@ pub const State = struct {
                 const y_reg_val = self.registers.getReg(payload.y_reg);
 
                 self.registers.setReg(payload.x_reg, x_reg_val | y_reg_val);
+                self.registers.setReg(0xF, 0);
                 self.program_counter.increment();
             },
             Instruction.inst_8XY2 => |payload| {
@@ -137,6 +146,7 @@ pub const State = struct {
                 const y_reg_val = self.registers.getReg(payload.y_reg);
 
                 self.registers.setReg(payload.x_reg, x_reg_val & y_reg_val);
+                self.registers.setReg(0xF, 0);
                 self.program_counter.increment();
             },
             Instruction.inst_8XY3 => |payload| {
@@ -144,6 +154,7 @@ pub const State = struct {
                 const y_reg_val = self.registers.getReg(payload.y_reg);
 
                 self.registers.setReg(payload.x_reg, x_reg_val ^ y_reg_val);
+                self.registers.setReg(0xF, 0);
                 self.program_counter.increment();
             },
             Instruction.inst_8XY4 => |payload| {
@@ -167,7 +178,7 @@ pub const State = struct {
                 self.program_counter.increment();
             },
             Instruction.inst_8XY6 => |payload| {
-                if (self.config.ambiguity_8xy6_8xye == Ambiguity.old) {
+                if (self.config.version == Version.chip_8) {
                     self.registers.setReg(payload.x_reg, self.registers.getReg(payload.y_reg));
                 }
 
@@ -189,7 +200,7 @@ pub const State = struct {
                 self.program_counter.increment();
             },
             Instruction.inst_8XYE => |payload| {
-                if (self.config.ambiguity_8xy6_8xye == Ambiguity.old) {
+                if (self.config.version == Version.chip_8) {
                     self.registers.setReg(payload.x_reg, self.registers.getReg(payload.y_reg));
                 }
 
@@ -214,6 +225,16 @@ pub const State = struct {
                 self.index_register.set(addr);
                 self.program_counter.increment();
             },
+            Instruction.inst_BNNN => |addr| {
+                const reg_num = switch (self.config.version) {
+                    Version.chip_8 => 0x0,
+                    Version.super_chip => (addr & 0x0F00) >> 8,
+                };
+
+                const reg_val = self.registers.getReg(reg_num);
+
+                self.program_counter.jump(addr + reg_val);
+            },
             Instruction.inst_DXYN => |payload| {
                 var y = self.registers.getReg(payload.y_reg) % Display.DISPLAY_HEIGHT;
 
@@ -231,11 +252,10 @@ pub const State = struct {
 
                         if (pixel == 1) {
                             if (self.display.getPixelStatus(x, y)) {
-                                try self.display.unsetPixel(x, y);
+                                self.display.unsetPixel(x, y);
                                 self.registers.setReg(0x0F, 1);
                             } else {
-                                try self.display.setPixel(x, y);
-                                std.debug.assert(self.display.getPixelStatus(x, y));
+                                self.display.setPixel(x, y);
                             }
                         }
 
@@ -251,7 +271,50 @@ pub const State = struct {
                         break;
                     }
                 }
+
                 try self.display.flush();
+
+                self.program_counter.increment();
+            },
+            Instruction.inst_EX9E => |reg| {
+                const reg_val = self.registers.getReg(reg);
+
+                if (try self.keypad.isKeyDown(reg_val)) {
+                    self.program_counter.increment();
+                }
+                self.program_counter.increment();
+            },
+            Instruction.inst_EXA1 => |reg| {
+                const reg_val = self.registers.getReg(reg);
+
+                if (!(try self.keypad.isKeyDown(reg_val))) {
+                    self.program_counter.increment();
+                }
+                self.program_counter.increment();
+            },
+            Instruction.inst_FX07 => |reg| {
+                const delay_timer_value = self.timers.getDelayTimer();
+                self.registers.setReg(reg, delay_timer_value);
+
+                self.program_counter.increment();
+            },
+            Instruction.inst_FX0A => |reg| {
+                if (self.keypad.recently_set == null) {
+                    return;
+                }
+
+                self.registers.setReg(reg, self.keypad.recently_set orelse unreachable);
+                self.program_counter.increment();
+            },
+            Instruction.inst_FX15 => |reg| {
+                const reg_val = self.registers.getReg(reg);
+                self.timers.updateDelayTimer(reg_val);
+
+                self.program_counter.increment();
+            },
+            Instruction.inst_FX18 => |reg| {
+                const reg_val = self.registers.getReg(reg);
+                self.timers.updateSoundTimer(reg_val);
 
                 self.program_counter.increment();
             },
@@ -275,18 +338,20 @@ pub const State = struct {
                 self.program_counter.increment();
             },
             Instruction.inst_FX55 => |reg| {
+                const index_reg_val = self.index_register.get();
                 for (0..(reg + 1)) |r| {
-                    self.memory.store(self.index_register.get() + @as(u8, @intCast(r)), self.registers.getReg(r));
-                    if (self.config.ambiguity_fx55_fx65 == Ambiguity.old) {
+                    self.memory.store(index_reg_val + @as(u8, @intCast(r)), self.registers.getReg(r));
+                    if (self.config.version == Version.chip_8) {
                         self.index_register.increment();
                     }
                 }
                 self.program_counter.increment();
             },
             Instruction.inst_FX65 => |reg| {
+                const index_reg_val = self.index_register.get();
                 for (0..(reg + 1)) |r| {
-                    self.registers.setReg(r, try self.memory.load(self.index_register.get() + @as(u8, @intCast(r))));
-                    if (self.config.ambiguity_fx55_fx65 == Ambiguity.old) {
+                    self.registers.setReg(r, try self.memory.load(index_reg_val + @as(u8, @intCast(r))));
+                    if (self.config.version == Version.chip_8) {
                         self.index_register.increment();
                     }
                 }

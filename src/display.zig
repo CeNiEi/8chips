@@ -24,7 +24,7 @@ pub const Display = struct {
         )) |result| {
             window = result;
         } else {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
             return Error.DisplayCreationFailed;
         }
 
@@ -35,19 +35,19 @@ pub const Display = struct {
                 DISPLAY_HEIGHT,
                 sdl.SDL_LOGICAL_PRESENTATION_STRETCH,
             )) {
-                std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+                std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
                 return Error.DisplayCreationFailed;
             }
             renderer = result;
         } else {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
             return Error.DisplayCreationFailed;
         }
 
         return .{ .window = window, .renderer = renderer };
     }
 
-    pub fn deinit(self: *const Display) void {
+    pub fn deinit(self: *Display) void {
         sdl.SDL_DestroyRenderer(self.renderer);
         sdl.SDL_DestroyWindow(self.window);
     }
@@ -56,43 +56,22 @@ pub const Display = struct {
         return self.pixel_tracker[y * DISPLAY_WIDTH + x];
     }
 
-    const State = enum { set, unset };
-
-    fn setPixelState(self: *Display, x: usize, y: usize, state: State) !void {
-        const r: u8, const g: u8, const b: u8, const pixel_state: bool = switch (state) {
-            .set => .{ 255, 255, 255, true },
-            .unset => .{ 0, 0, 0, false },
-        };
-
-        if (!sdl.SDL_SetRenderDrawColor(self.renderer, r, g, b, sdl.SDL_ALPHA_OPAQUE)) {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
-            return Error.DisplayDrawingFailed;
-        }
-
-        if (!sdl.SDL_RenderPoint(self.renderer, @floatFromInt(x), @floatFromInt(y))) {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
-            return Error.DisplayDrawingFailed;
-        }
-
-        self.pixel_tracker[y * DISPLAY_WIDTH + x] = pixel_state;
+    pub fn setPixel(self: *Display, x: usize, y: usize) void {
+        self.pixel_tracker[y * DISPLAY_WIDTH + x] = true;
     }
 
-    pub fn setPixel(self: *Display, x: usize, y: usize) !void {
-        return self.setPixelState(x, y, State.set);
-    }
-
-    pub fn unsetPixel(self: *Display, x: usize, y: usize) !void {
-        return self.setPixelState(x, y, State.unset);
+    pub fn unsetPixel(self: *Display, x: usize, y: usize) void {
+        self.pixel_tracker[y * DISPLAY_WIDTH + x] = false;
     }
 
     pub fn clear(self: *Display) !void {
         if (!sdl.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255)) {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
             return Error.DisplayClearFailed;
         }
 
         if (!sdl.SDL_RenderClear(self.renderer)) {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
             return Error.DisplayClearFailed;
         }
 
@@ -100,8 +79,34 @@ pub const Display = struct {
     }
 
     pub fn flush(self: *Display) !void {
+        if (!sdl.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255)) {
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            return Error.DisplayClearFailed;
+        }
+
+        if (!sdl.SDL_RenderClear(self.renderer)) {
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            return Error.DisplayClearFailed;
+        }
+
+        if (!sdl.SDL_SetRenderDrawColor(self.renderer, 255, 255, 255, 255)) {
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            return Error.DisplayClearFailed;
+        }
+
+        for (0..DISPLAY_HEIGHT) |y| {
+            for (0..DISPLAY_WIDTH) |x| {
+                if (self.pixel_tracker[y * DISPLAY_WIDTH + x]) {
+                    if (!sdl.SDL_RenderPoint(self.renderer, @floatFromInt(x), @floatFromInt(y))) {
+                        std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
+                        return Error.DisplayDrawingFailed;
+                    }
+                }
+            }
+        }
+
         if (!sdl.SDL_RenderPresent(self.renderer)) {
-            std.log.err("[SDL]: {s}\n", .{sdl.SDL_GetError()});
+            std.log.err("\n[SDL]: {s}\n", .{sdl.SDL_GetError()});
             return Error.DisplayPresentFailed;
         }
     }

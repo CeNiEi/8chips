@@ -5,8 +5,10 @@ const Error = @import("error.zig").Error;
 const sdl = @cImport(@cInclude("SDL3/SDL.h"));
 
 pub fn main() !void {
-    var state = try State.init("/Users/tushar/Downloads/bc_test.ch8");
+    var state = try State.init("/Users/tushar/Downloads/5-quirks.ch8");
     defer state.deinit();
+
+    try state.setup();
 
     var event: sdl.SDL_Event = undefined;
 
@@ -14,17 +16,19 @@ pub fn main() !void {
         while (sdl.SDL_PollEvent(&event)) {
             switch (event.type) {
                 sdl.SDL_EVENT_QUIT => break :main_loop,
-                else => {
-                    std.debug.print("EVENT: {}\n", .{event.type});
+                sdl.SDL_EVENT_KEY_DOWN => {
+                    state.keypad.setKey(event.key.scancode);
                 },
+                sdl.SDL_EVENT_KEY_UP => {
+                    state.keypad.unsetKey(event.key.scancode);
+                },
+                else => {},
             }
         }
 
         const inst = try state.fetch();
-
-        std.debug.print("instruction: {}\n", .{inst});
         try state.execute(inst);
 
-        sdl.SDL_Delay(10);
+        state.keypad.recently_set = null;
     }
 }

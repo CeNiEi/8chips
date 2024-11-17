@@ -9,4 +9,7 @@ pub const Error = error{
     StackEmpty,
     OutOfBounds,
     InvalidInstruction,
+    TimerCreationFailed,
+    AudioInitializationFailed,
+    InvalidKey,
 };

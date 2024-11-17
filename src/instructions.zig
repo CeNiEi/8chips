@@ -1,4 +1,3 @@
-const native_endian = @import("builtin").target.cpu.arch.endian();
 const std = @import("std");
 const Error = @import("error.zig").Error;
 
@@ -68,11 +67,18 @@ pub const Instruction = union(enum) {
         y_reg: u8,
     },
     inst_ANNN: u16,
+    inst_BNNN: u16,
     inst_DXYN: struct {
         x_reg: u8,
         y_reg: u8,
         height: u8,
     },
+    inst_EX9E: u8,
+    inst_EXA1: u8,
+    inst_FX0A: u8,
+    inst_FX07: u8,
+    inst_FX15: u8,
+    inst_FX18: u8,
     inst_FX1E: u8,
     inst_FX33: u8,
     inst_FX55: u8,
@@ -86,7 +92,6 @@ pub const Instruction = union(enum) {
         return switch (first_nibble) {
             0x0 => {
                 std.debug.assert((raw_inst_le & 0x0FF0) >> 4 == 0x0e);
-
                 const fourth_nibble = (raw_inst_le & 0x000F);
 
                 switch (fourth_nibble) {
@@ -97,7 +102,7 @@ pub const Instruction = union(enum) {
                         return Instruction.inst_00EE;
                     },
                     else => {
-                        std.log.err("[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
+                        std.log.err("\n[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
                         return Error.InvalidInstruction;
                     },
                 }
@@ -219,7 +224,7 @@ pub const Instruction = union(enum) {
                     },
 
                     else => {
-                        std.log.err("[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
+                        std.log.err("\n[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
                         return Error.InvalidInstruction;
                     },
                 }
@@ -239,6 +244,10 @@ pub const Instruction = union(enum) {
                 const addr = raw_inst_le & 0x0FFF;
                 return Instruction{ .inst_ANNN = addr };
             },
+            0xB => {
+                const addr = raw_inst_le & 0x0FFF;
+                return Instruction{ .inst_BNNN = addr };
+            },
             0xD => {
                 const x_reg: u8 = @intCast((raw_inst_le & 0x0F00) >> 8);
                 const y_reg: u8 = @intCast((raw_inst_le & 0x00F0) >> 4);
@@ -250,12 +259,42 @@ pub const Instruction = union(enum) {
                     .height = height,
                 } };
             },
+            0xE => {
+                const reg: u8 = @intCast((raw_inst_le & 0x0F00) >> 8);
+                const second_byte = (raw_inst_le & 0x00FF);
+
+                switch (second_byte) {
+                    0x9E => {
+                        return Instruction{ .inst_EX9E = reg };
+                    },
+                    0xA1 => {
+                        return Instruction{ .inst_EXA1 = reg };
+                    },
+
+                    else => {
+                        std.log.err("\n[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
+                        return Error.InvalidInstruction;
+                    },
+                }
+            },
             0xF => {
                 const reg: u8 = @intCast((raw_inst_le & 0x0F00) >> 8);
 
                 const second_byte = (raw_inst_le & 0x00FF);
 
                 switch (second_byte) {
+                    0x07 => {
+                        return Instruction{ .inst_FX07 = reg };
+                    },
+                    0x0a => {
+                        return Instruction{ .inst_FX0A = reg };
+                    },
+                    0x15 => {
+                        return Instruction{ .inst_FX15 = reg };
+                    },
+                    0x18 => {
+                        return Instruction{ .inst_FX18 = reg };
+                    },
                     0x1e => {
                         return Instruction{ .inst_FX1E = reg };
                     },
@@ -269,14 +308,13 @@ pub const Instruction = union(enum) {
                         return Instruction{ .inst_FX65 = reg };
                     },
                     else => {
-                        std.log.err("[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
+                        std.log.err("\n[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
                         return Error.InvalidInstruction;
                     },
                 }
             },
-
             else => {
-                std.log.err("[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
+                std.log.err("\n[InvalidInstruction]: 0x{x}\n", .{raw_inst_le});
                 return Error.InvalidInstruction;
             },
         };
